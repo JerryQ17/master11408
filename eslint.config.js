@@ -15,6 +15,7 @@ export default tseslint.config(
       'test-results/**',
       'worker-configuration.d.ts',
       'migrations/meta/**',
+      '.vscode/**',
     ],
   },
   js.configs.recommended,

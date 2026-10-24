@@ -68,7 +68,8 @@ try {
       throw new Error(
         'Existing users add credentials while signed in; use recover only when needed',
       );
-    const epoch = user.auth_epoch + (action === 'recover' ? 1 : 0);
+    const currentEpoch = Number(user.auth_epoch) || 0;
+    const epoch = currentEpoch + (action === 'recover' ? 1 : 0);
     const token = randomBytes(32).toString('hex');
     const inviteId = crypto.randomUUID();
     const operations = [
