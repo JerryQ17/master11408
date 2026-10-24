@@ -98,6 +98,7 @@ export async function createE2EAuthenticatedSession() {
   );
 
   const secret =
+    platform.env.BETTER_AUTH_SECRET ||
     process.env.BETTER_AUTH_SECRET ||
     'd7f07fdccc9046f847672af48ab526398397d00aa946b8c5bc4d903ec97221b2';
   const signed = await signTestToken(token, secret);

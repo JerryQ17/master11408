@@ -9,9 +9,13 @@ import rehypeHighlight from 'rehype-highlight';
 import rehypeSanitize, { defaultSchema } from 'rehype-sanitize';
 import rehypeStringify from 'rehype-stringify';
 
-const props = defineProps<{
-  content: string;
-}>();
+const props = withDefaults(
+  defineProps<{
+    content: string;
+    questionLinksEnabled?: boolean;
+  }>(),
+  { questionLinksEnabled: true },
+);
 
 const emit = defineEmits<{
   (e: 'selectQuestion', questionId: string): void;
@@ -78,9 +82,10 @@ watchEffect(async () => {
   const mathNormalized = normalizeMath(props.content);
 
   // 将 :::question id=xyz 替换为受控例题链接
-  const preprocessed = mathNormalized.replace(
-    /:::question\s+id=([^\s]+)/g,
-    (_, id) => `\n\n> 💡 **关联例题**：[\`${id}\` 前往练习该题 →](#question-${id})\n\n`,
+  const preprocessed = mathNormalized.replace(/:::question\s+id=([^\s]+)/g, (_, id) =>
+    props.questionLinksEnabled === false
+      ? `\n\n> 💡 **关联例题**：\`${id}\`\n\n`
+      : `\n\n> 💡 **关联例题**：[\`${id}\` 前往练习该题 →](#question-${id})\n\n`,
   );
 
   try {

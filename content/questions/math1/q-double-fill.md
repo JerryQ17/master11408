@@ -1,5 +1,7 @@
 ---
 id: math1.double-integral.fill
+notes:
+  - note.math1.double-integral.def
 type: fill_blank
 difficulty: 3
 topics:

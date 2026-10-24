@@ -1,4 +1,5 @@
-import { sqliteTable, text, integer, primaryKey } from 'drizzle-orm/sqlite-core';
+import { sqliteTable, text, integer, primaryKey, index, check } from 'drizzle-orm/sqlite-core';
+import { sql } from 'drizzle-orm';
 
 export const topics = sqliteTable('topics', {
   id: text('id').primaryKey(),
@@ -66,6 +67,39 @@ export const questionTopics = sqliteTable(
       .references(() => topics.id),
   },
   (table) => [primaryKey({ columns: [table.questionId, table.topicId] })],
+);
+
+export const questionNotes = sqliteTable(
+  'question_notes',
+  {
+    questionId: text('question_id')
+      .notNull()
+      .references(() => questions.id),
+    noteId: text('note_id')
+      .notNull()
+      .references(() => notes.id),
+  },
+  (table) => [
+    primaryKey({ columns: [table.questionId, table.noteId] }),
+    index('question_notes_by_note').on(table.noteId, table.questionId),
+  ],
+);
+
+export const noteReferences = sqliteTable(
+  'note_references',
+  {
+    sourceNoteId: text('source_note_id')
+      .notNull()
+      .references(() => notes.id),
+    targetNoteId: text('target_note_id')
+      .notNull()
+      .references(() => notes.id),
+  },
+  (table) => [
+    primaryKey({ columns: [table.sourceNoteId, table.targetNoteId] }),
+    index('note_references_by_target').on(table.targetNoteId, table.sourceNoteId),
+    check('note_references_no_self', sql`${table.sourceNoteId} <> ${table.targetNoteId}`),
+  ],
 );
 
 export const tags = sqliteTable('tags', {

@@ -1,5 +1,8 @@
 ---
 id: math1.double-integral.written
+notes:
+  - note.math1.double-integral.calc
+  - note.math1.double-integral.change-order
 type: written
 difficulty: 4
 topics:

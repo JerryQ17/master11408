@@ -6,6 +6,7 @@ import StudyPage from '../pages/StudyPage.vue';
 import PracticeSessionPage from '../pages/PracticeSessionPage.vue';
 import WrongBookPage from '../pages/WrongBookPage.vue';
 import StatisticsPage from '../pages/StatisticsPage.vue';
+import NotePage from '../pages/NotePage.vue';
 
 export const router = createRouter({
   history: createWebHistory(),
@@ -15,6 +16,8 @@ export const router = createRouter({
     { path: '/settings', component: SettingsPage },
     { path: '/wrong-book', component: WrongBookPage },
     { path: '/statistics', component: StatisticsPage },
+    { path: '/notes/:noteId', component: NotePage },
+    { path: '/graph/:subjectId', component: () => import('../pages/GraphPage.vue') },
     { path: '/practice/:sessionId/:ordinal', component: PracticeSessionPage },
     { path: '/study/:topicId', component: StudyPage },
     { path: '/', redirect: '/study/math1.double-integral.definition' },

@@ -27,6 +27,7 @@ export interface NoteEntity {
   title: string;
   sortOrder: number;
   bodyMd: string;
+  references: string[];
   contentHash: string;
   filePath: string;
 }
@@ -39,6 +40,7 @@ export interface QuestionEntity {
   examYear: number | null;
   topics: string[];
   tags: string[];
+  notes: string[];
   stemMd: string;
   options: { key: string; content: string }[] | null;
   answer: string | string[];
@@ -124,6 +126,22 @@ export function parseQuestionSections(
 export function computeContentHash(data: unknown): string {
   const normalized = typeof data === 'string' ? data : JSON.stringify(data);
   return createHash('sha256').update(normalized, 'utf8').digest('hex');
+}
+
+export function parseNoteIds(
+  value: unknown,
+  field: string,
+  filePath: string,
+  errors: string[],
+): string[] {
+  if (value === undefined) return [];
+  if (!Array.isArray(value) || value.some((id) => typeof id !== 'string' || !id.trim())) {
+    errors.push(`${filePath}: ${field} 必须是非空字符串 ID 数组`);
+    return [];
+  }
+  const ids = value as string[];
+  if (new Set(ids).size !== ids.length) errors.push(`${filePath}: ${field} 包含重复 ID`);
+  return [...new Set(ids)].sort();
 }
 
 async function getFilesRecursively(dir: string, ext = '.md'): Promise<string[]> {
@@ -274,6 +292,7 @@ export async function validateContent(baseDir = 'content'): Promise<ValidationRe
       }
 
       const bodyMd = parsed.content.trim();
+      const references = parseNoteIds(data.references, 'references', filePath, errors);
       if (!bodyMd) {
         errors.push(`${filePath}: 笔记内容正文不能为空`);
       }
@@ -283,6 +302,8 @@ export async function validateContent(baseDir = 'content'): Promise<ValidationRe
         topic: data.topic,
         title: data.title ?? '',
         bodyMd,
+        references,
+        order: data.order ?? 0,
       });
 
       notesList.push({
@@ -291,11 +312,19 @@ export async function validateContent(baseDir = 'content'): Promise<ValidationRe
         title: data.title ?? '未命名笔记',
         sortOrder: typeof data.order === 'number' ? data.order : 0,
         bodyMd,
+        references,
         contentHash: hash,
         filePath,
       });
     } catch (err) {
       errors.push(`${filePath}: 解析笔记错误 - ${(err as Error).message}`);
+    }
+  }
+
+  for (const note of notesList) {
+    for (const id of note.references) {
+      if (!noteIds.has(id)) errors.push(`${note.filePath}: references 引用的笔记 "${id}" 不存在`);
+      if (id === note.id) errors.push(`${note.filePath}: references 不得引用笔记自身`);
     }
   }
 
@@ -431,6 +460,10 @@ export async function validateContent(baseDir = 'content'): Promise<ValidationRe
 
       // 解析正文分区
       const { stemMd, explanationMd } = parseQuestionSections(parsed.content, filePath);
+      const notes = parseNoteIds(data.notes, 'notes', filePath, errors);
+      for (const id of notes) {
+        if (!noteIds.has(id)) errors.push(`${filePath}: notes 引用的笔记 "${id}" 不存在`);
+      }
 
       // 计算规范化 Revision Content Hash
       const hash = computeContentHash({
@@ -443,6 +476,7 @@ export async function validateContent(baseDir = 'content'): Promise<ValidationRe
         options: optionsList,
         answer: data.answer,
         explanationMd,
+        notes,
       });
 
       questionsList.push({
@@ -453,6 +487,7 @@ export async function validateContent(baseDir = 'content'): Promise<ValidationRe
         examYear,
         topics: data.topics,
         tags: data.tags,
+        notes,
         stemMd,
         options: optionsList,
         answer: data.answer,

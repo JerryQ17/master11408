@@ -1,5 +1,7 @@
 ---
 id: math1.double-integral.multi
+notes:
+  - note.math1.double-integral.properties
 type: multiple_choice
 difficulty: 4
 topics:

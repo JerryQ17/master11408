@@ -105,6 +105,11 @@ onMounted(() => {
         <template v-for="node in treeData" :key="node.id">
           <!-- 递归树项 -->
           <li class="tree-node">
+            <RouterLink
+              :to="`/graph/${node.id}`"
+              class="block px-3 py-1 text-xs text-ctp-mauve hover:underline"
+              >{{ node.title }} · 科目图谱 →</RouterLink
+            >
             <div
               class="tree-item flex items-center justify-between px-2.5 py-1.5 rounded-lg text-sm cursor-pointer transition-colors"
               :class="{

@@ -55,7 +55,7 @@ test.describe('11408 Study — End-to-End User Journeys', () => {
 
     // 进入设置页面核验 Passkey 列表
     await page.goto('/settings');
-    await expect(page.getByRole('heading', { name: '账户与设备' })).toBeVisible();
+    await expect(page.getByRole('heading', { name: '账户与偏好' })).toBeVisible();
     await expect(page.getByText('我的主力工作站')).toBeVisible();
 
     // 点击退出登录
@@ -83,7 +83,7 @@ test.describe('11408 Study — End-to-End User Journeys', () => {
 
     // 验证左侧知识点目录加载
     await expect(page.getByText('复习导航')).toBeVisible();
-    await expect(page.getByText('数学一')).toBeVisible();
+    await expect(page.getByText('数学一', { exact: true })).toBeVisible();
 
     // 验证笔记标题与正文渲染
     await expect(
@@ -276,14 +276,16 @@ test.describe('11408 Study — End-to-End User Journeys', () => {
       },
     ]);
 
-    // 创建只包含第 3 题（q-double-003，包含 \pi 和 2\pi 选项）的题组
+    await page.goto('/study/math1.double-integral.definition?tab=practice');
+
+    // 固定第 3、4 题，首题包含 \pi 和 2\pi 选项。
     const { sessionId } = await page.evaluate<{ sessionId: string }>(async () => {
       const res = await fetch('/api/v1/practice-sessions', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           creationKey: `e2e-katex-opt-${Date.now()}`,
-          topics: ['math1.double-integral.definition'],
+          questionIds: ['math1.double-integral.003', 'math1.double-integral.004'],
           types: ['single_choice'],
           count: 2,
         }),

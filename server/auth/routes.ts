@@ -4,6 +4,7 @@ import { createAuth } from './index';
 import { consumeLimit, readAccess, readInvite } from './access';
 import type { AppEnv } from '../context';
 import { topicsRoute } from '../routes/topics';
+import { knowledgeRoute } from '../routes/knowledge';
 import { tagsRoute } from '../routes/tags';
 import { questionsRoute } from '../routes/questions';
 import { practiceRoute } from '../routes/practice';
@@ -108,6 +109,7 @@ protectedApi.get('/me', (c) =>
 protectedApi.route('/topics', topicsRoute);
 protectedApi.route('/tags', tagsRoute);
 protectedApi.route('/questions', questionsRoute);
+protectedApi.route('/', knowledgeRoute);
 protectedApi.route('/', practiceRoute);
 protectedApi.route('/attempts', attemptsRoute);
 protectedApi.route('/', wrongBookRoute);

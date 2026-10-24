@@ -1,5 +1,8 @@
 ---
 id: math1.double-integral.009
+notes:
+  - note.math1.double-integral.calc
+  - note.math1.double-integral.properties
 type: single_choice
 difficulty: 3
 topics:

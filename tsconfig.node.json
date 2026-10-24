@@ -1,5 +1,11 @@
 {
   "extends": "./tsconfig.json",
   "compilerOptions": { "lib": ["ES2023", "DOM"], "types": ["node", "@cloudflare/workers-types"] },
-  "include": ["*.config.ts", "scripts/**/*.ts", "tests/e2e/**/*.ts", "shared/**/*.ts"]
+  "include": [
+    "*.config.ts",
+    "scripts/**/*.ts",
+    "tests/e2e/**/*.ts",
+    "tests/content-validator.test.ts",
+    "shared/**/*.ts"
+  ]
 }

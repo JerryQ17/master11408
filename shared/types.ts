@@ -26,6 +26,48 @@ export interface NoteDto {
   sortOrder: number;
 }
 
+export interface NoteSummaryDto {
+  id: string;
+  topicId: string;
+  title: string;
+  subjectId: string;
+}
+
+export interface LinkedQuestionDto {
+  id: string;
+  type: QuestionType;
+  difficulty: number;
+}
+
+export interface NoteDetailDto extends NoteDto {
+  subjectId: string;
+  references: NoteSummaryDto[];
+  backlinks: NoteSummaryDto[];
+  questions: LinkedQuestionDto[];
+}
+
+export interface GraphNodeDto {
+  id: string;
+  entityId: string;
+  kind: 'note' | 'question';
+  title: string;
+  topicId?: string;
+}
+
+export interface GraphEdgeDto {
+  id: string;
+  source: string;
+  target: string;
+  kind: 'reference' | 'tests';
+}
+
+export interface KnowledgeGraphDto {
+  nodes: GraphNodeDto[];
+  edges: GraphEdgeDto[];
+  subjects: { id: string; title: string }[];
+  topics: { id: string; title: string; parentId: string | null }[];
+}
+
 export type QuestionType = 'single_choice' | 'multiple_choice' | 'fill_blank' | 'written';
 export type SourceKind = 'original' | 'exam' | 'reference';
 export type AttemptState = 'revealed_pending_self_eval' | 'evaluated';

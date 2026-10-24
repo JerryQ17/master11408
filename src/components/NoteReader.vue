@@ -2,13 +2,17 @@
 import { ref, watch } from 'vue';
 import type { NoteDto } from '../../shared/types';
 import MarkdownRenderer from './MarkdownRenderer.vue';
+import LocalGraph from './LocalGraph.vue';
+import { useRouter } from 'vue-router';
+
+const router = useRouter();
 
 const props = defineProps<{
   topicId: string;
   topicTitle?: string;
 }>();
 
-defineEmits<{
+const emit = defineEmits<{
   (e: 'practiceQuestion', questionId: string): void;
   (e: 'startPractice'): void;
 }>();
@@ -100,10 +104,23 @@ watch(
         <h3 class="text-xl font-bold text-ctp-text mb-4 pb-2 border-b border-ctp-surface1">
           {{ note.title }}
         </h3>
+        <RouterLink :to="`/notes/${note.id}`" class="inline-block mb-4 text-sm text-ctp-mauve"
+          >阅读考点与关联图谱 →</RouterLink
+        >
         <MarkdownRenderer
           :content="note.bodyMd"
           @select-question="(qId) => $emit('practiceQuestion', qId)"
         />
+        <div class="mt-6">
+          <LocalGraph
+            :note-id="note.id"
+            @select="
+              $event.kind === 'note'
+                ? router.push(`/notes/${$event.entityId}`)
+                : emit('practiceQuestion', $event.entityId)
+            "
+          />
+        </div>
       </article>
     </div>
   </div>

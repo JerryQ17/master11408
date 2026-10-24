@@ -5,6 +5,7 @@ import TopicTree from '../components/TopicTree.vue';
 import NoteReader from '../components/NoteReader.vue';
 import PracticeFilters from '../components/PracticeFilters.vue';
 import PracticeScreen from '../components/PracticeScreen.vue';
+import { createQuestionPractice } from '../app/knowledge';
 import type { TopicTreeNode, PracticeSessionSummaryDto } from '../../shared/types';
 
 const route = useRoute();
@@ -17,6 +18,21 @@ const currentTab = computed(() => (route.query.tab as string) || 'notes');
 const activeSessionId = ref<string | null>(null);
 const currentTopicTitle = ref('');
 const isMobileSidebarOpen = ref(false);
+const practiceError = ref('');
+const startingQuestion = ref(false);
+
+async function practiceQuestion(id: string) {
+  if (startingQuestion.value) return;
+  startingQuestion.value = true;
+  practiceError.value = '';
+  try {
+    await router.push(`/practice/${await createQuestionPractice(id)}/1`);
+  } catch (err) {
+    practiceError.value = (err as Error).message;
+  } finally {
+    startingQuestion.value = false;
+  }
+}
 
 const recentSessions = ref<PracticeSessionSummaryDto[]>([]);
 const loadingSessions = ref(false);
@@ -124,13 +140,14 @@ onMounted(() => {
 
       <!-- 内容区根据 Tab 切换 -->
       <div class="p-4 sm:p-6 flex-1">
+        <p v-if="practiceError" role="alert" class="mb-4 text-ctp-red">{{ practiceError }}</p>
         <!-- 知识点模式 -->
         <template v-if="currentTab === 'notes'">
           <NoteReader
             :topic-id="currentTopicId"
             :topic-title="currentTopicTitle"
             @start-practice="setTab('practice')"
-            @practice-question="setTab('practice')"
+            @practice-question="practiceQuestion"
           />
         </template>
 

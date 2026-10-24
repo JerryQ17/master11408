@@ -37,6 +37,12 @@ async function signOut() {
         </RouterLink>
         <nav class="hidden sm:flex items-center gap-6 text-sm font-medium">
           <RouterLink
+            to="/graph/math1"
+            class="text-ctp-subtext0 hover:text-ctp-text transition-colors"
+            active-class="text-ctp-mauve font-bold"
+            >知识图谱</RouterLink
+          >
+          <RouterLink
             to="/study/math1.double-integral.definition"
             class="text-ctp-subtext0 hover:text-ctp-text transition-colors"
             active-class="text-ctp-mauve font-bold"

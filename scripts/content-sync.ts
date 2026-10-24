@@ -1,6 +1,7 @@
 import { parseArgs } from 'node:util';
 import { validateContent } from './content-validator.ts';
 import { createD1Adapter, type D1Statement } from './d1-adapter.ts';
+import { buildRelationStatements } from './content-relations.ts';
 
 const { values } = parseArgs({
   options: {
@@ -53,6 +54,7 @@ interface DbTag {
 interface DbNote {
   id: string;
   content_hash: string;
+  active: number;
 }
 
 interface DbQuestion {
@@ -73,7 +75,7 @@ try {
     'SELECT owner_token, fencing_version, lease_expires_at FROM content_sync_lock WHERE id = "singleton";',
     'SELECT id, slug, title, sort_order, active FROM topics;',
     'SELECT id, parent_id, name, slug, sort_order, exam_year, active FROM tags;',
-    'SELECT id, content_hash FROM notes;',
+    'SELECT id, content_hash, active FROM notes;',
     'SELECT id, current_revision, active FROM questions;',
     'SELECT question_id, revision, content_hash FROM question_revisions;',
   ].join('\n');
@@ -222,7 +224,7 @@ try {
             .bind(n.id, n.topicId, n.title, n.bodyMd, n.sortOrder ?? 0, n.contentHash),
         );
       }
-    } else if (existing.content_hash !== n.contentHash) {
+    } else if (existing.content_hash !== n.contentHash || existing.active === 0) {
       notesUpdated++;
       if (!isDryRun) {
         batchStmts.push(
@@ -339,6 +341,15 @@ try {
 
   // 归档处理
   if (!isDryRun) {
+    const currentNoteIds = new Set(validation.notes.map((n) => n.id));
+    for (const [id, note] of existingNotes) {
+      if (note.active === 1 && !currentNoteIds.has(id)) {
+        batchStmts.push(db.prepare('UPDATE notes SET active = 0 WHERE id = ?').bind(id));
+      }
+    }
+    for (const statement of buildRelationStatements(validation.notes, validation.questions)) {
+      batchStmts.push(db.prepare(statement.sql).bind(...statement.params));
+    }
     const currentQuestionIds = new Set(validation.questions.map((q) => q.id));
     for (const [id, q] of existingQuestions.entries()) {
       if (q.active === 1 && !currentQuestionIds.has(id)) {
@@ -353,6 +364,10 @@ try {
     topics: { added: topicsAdded, updated: topicsUpdated },
     tags: { added: tagsAdded, updated: tagsUpdated },
     notes: { added: notesAdded, updated: notesUpdated },
+    relations: {
+      questionNotes: validation.questions.reduce((sum, q) => sum + q.notes.length, 0),
+      noteReferences: validation.notes.reduce((sum, n) => sum + n.references.length, 0),
+    },
     questions: {
       added: questionsAdded,
       updated: questionsUpdated,

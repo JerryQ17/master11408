@@ -2,6 +2,8 @@
 import { ref, computed, watch, onMounted, onUnmounted } from 'vue';
 import type { SessionItemViewDto, AttemptResult } from '../../shared/types';
 import MarkdownRenderer from './MarkdownRenderer.vue';
+import QuestionKnowledge from './QuestionKnowledge.vue';
+import NoteDrawer from './NoteDrawer.vue';
 
 const props = defineProps<{
   sessionId: string;
@@ -17,6 +19,7 @@ const itemView = ref<SessionItemViewDto | null>(null);
 const loading = ref(true);
 const submitting = ref(false);
 const error = ref('');
+const activeNoteId = ref<string | null>(null);
 
 // 客户端当前草稿作答
 const selectedKeys = ref<string[]>([]);
@@ -287,6 +290,7 @@ function goNext() {
 
 // 键盘快捷键监听
 function onKeyDown(e: KeyboardEvent) {
+  if (activeNoteId.value || e.defaultPrevented) return;
   const target = e.target as HTMLElement;
   const isInput =
     target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.isContentEditable;
@@ -530,6 +534,8 @@ watch(
         </div>
       </div>
 
+      <QuestionKnowledge :question-id="itemView.question.id" @open-note="activeNoteId = $event" />
+
       <!-- 解析与自评卡片 (仅提交或揭示后可见) -->
       <div
         v-if="hasAttempt && itemView.solution"
@@ -653,5 +659,6 @@ watch(
         </button>
       </div>
     </div>
+    <NoteDrawer :note-id="activeNoteId" @close="activeNoteId = null" />
   </div>
 </template>
