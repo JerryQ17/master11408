@@ -1,0 +1,10 @@
+node_modules
+dist
+.wrangler
+.sites-runtime
+coverage
+playwright-report
+test-results
+pnpm-lock.yaml
+worker-configuration.d.ts
+migrations/meta

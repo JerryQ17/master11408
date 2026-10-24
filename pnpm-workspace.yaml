@@ -1,0 +1,9 @@
+allowBuilds:
+  esbuild: true
+  workerd: true
+minimumReleaseAgeExclude:
+  - '@cloudflare/vite-plugin@1.65.0'
+  - '@cloudflare/workers-types@5.20261024.1'
+  - katex@0.19.1
+saveExact: true
+verifyDepsBeforeRun: false

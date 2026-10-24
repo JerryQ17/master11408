@@ -1,0 +1,37 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="theme-color" content="#f5f3ed" />
+    <meta name="referrer" content="no-referrer" />
+    <title>11408 · 日日有进</title>
+    <script>
+      (function () {
+        try {
+          if (window.location.hostname === '127.0.0.1') {
+            window.location.hostname = 'localhost';
+            return;
+          }
+          var saved = localStorage.getItem('catppuccin-flavor');
+          var flavor =
+            saved && ['latte', 'frappe', 'macchiato', 'mocha'].indexOf(saved) !== -1
+              ? saved
+              : window.matchMedia && window.matchMedia('(prefers-color-scheme: light)').matches
+                ? 'latte'
+                : 'mocha';
+          document.documentElement.setAttribute('data-theme', flavor);
+          if (flavor === 'latte') {
+            document.documentElement.classList.remove('dark');
+          } else {
+            document.documentElement.classList.add('dark');
+          }
+        } catch (e) {}
+      })();
+    </script>
+  </head>
+  <body>
+    <div id="app"></div>
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>

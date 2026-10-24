@@ -3,7 +3,7 @@
 > 状态：完整 v1 细化规格；产品决策已确认，外部依赖须通过 Phase 0.5 验证
 > 日期：2026-10-24
 > 交付目标：可在 Cloudflare Workers 部署、使用 Passkey 登录、浏览知识点、按章节/标签练习、自动或手动判题、持久化答题记录和错题的单用户/少量用户复习平台。
-> 本轮工作仅审查和细化计划，不启动应用实现、不部署。审查依据与决策记录见 [implementation-plan-review.md](./implementation-plan-review.md)。
+> 2026-10-24 已获授权开始实现；先完成 CI，再推进功能。用户连接 Cloudflare 前仅本地开发，不部署。审查记录见 [implementation-plan-review.md](./implementation-plan-review.md)，进度见 [implementation-progress.md](./implementation-progress.md)。
 
 ### 已确认的交付决策（2026-10-24）
 
@@ -100,17 +100,17 @@
 
 所有业务 ID 使用**稳定的字符串 ID**，与展示名称分离。FK、UNIQUE 和必需索引必须在迁移中声明；`PRAGMA foreign_keys` 的具体使用遵照 D1 官方行为。业务时间统一为 UTC Unix 毫秒，展示时转换到用户时区；认证库生成的 Date/时间列遵循其 adapter 约定，在边界转换，不擅改生成的 schema。
 
-| 表                   | 主要列 / 约束                                                                                                          | 目的                             |
-| -------------------- | ---------------------------------------------------------------------------------------------------------------------- | -------------------------------- |
-| `topics`             | `id PK`, `parent_id FK nullable`, `slug`, `title`, `sort_order`, `active`                                              | 任意深度章节树；顶层为四门科目   |
-| `notes`              | `id PK`, `topic_id FK`, `title`, `body_md`, `sort_order`, `content_hash`, `active`                                     | 知识点内容；同章节多篇可排序     |
-| `questions`          | `id PK`, `type`, `difficulty`, `current_revision`, `source_kind`, `exam_year nullable`, `active`                       | 题目稳定实体与筛选元数据         |
+| 表                   | 主要列 / 约束                                                                                                                                                           | 目的                                             |
+| -------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------ |
+| `topics`             | `id PK`, `parent_id FK nullable`, `slug`, `title`, `sort_order`, `active`                                                                                               | 任意深度章节树；顶层为四门科目                   |
+| `notes`              | `id PK`, `topic_id FK`, `title`, `body_md`, `sort_order`, `content_hash`, `active`                                                                                      | 知识点内容；同章节多篇可排序                     |
+| `questions`          | `id PK`, `type`, `difficulty`, `current_revision`, `source_kind`, `exam_year nullable`, `active`                                                                        | 题目稳定实体与筛选元数据                         |
 | `question_revisions` | `(question_id, revision) PK`, `type`, `metadata_json`, `stem_md`, `options_json`, `answer_json`, `explanation_md`, `assets_manifest_json`, `content_hash`, `created_at` | 不可变的题型、题干、元数据、答案、解析与资源快照 |
-| `question_topics`    | `(question_id, topic_id) PK`                                                                                           | 题目与知识点多对多               |
-| `tags`               | `id PK`, `parent_id FK nullable`, `name`, `slug`, `sort_order`, `exam_year nullable`, `active`                         | 标签树；年份用结构化字段校验     |
-| `question_tags`      | `(question_id, tag_id) PK`                                                                                             | 标签多对多                       |
-| `content_sync_runs`  | `id PK`, `git_sha`, `source_hash`, `target_env`, `started_at`, `finished_at`, `status`, `summary_json`                  | 导入溯源、部分成功和排错         |
-| `content_sync_lock`  | `id PK`, `owner_token`, `fencing_version`, `lease_expires_at`                                                       | 每库单写入者；过期接管时递增 fencing version |
+| `question_topics`    | `(question_id, topic_id) PK`                                                                                                                                            | 题目与知识点多对多                               |
+| `tags`               | `id PK`, `parent_id FK nullable`, `name`, `slug`, `sort_order`, `exam_year nullable`, `active`                                                                          | 标签树；年份用结构化字段校验                     |
+| `question_tags`      | `(question_id, tag_id) PK`                                                                                                                                              | 标签多对多                                       |
+| `content_sync_runs`  | `id PK`, `git_sha`, `source_hash`, `target_env`, `started_at`, `finished_at`, `status`, `summary_json`                                                                  | 导入溯源、部分成功和排错                         |
+| `content_sync_lock`  | `id PK`, `owner_token`, `fencing_version`, `lease_expires_at`                                                                                                           | 每库单写入者；过期接管时递增 fencing version     |
 
 - `topics` 和 `tags` 导入前检测循环、无效父节点、重复 ID；删除内容时优先 `active=false`，不得级联删除已有做题历史。
 - `questions.type` 为 `single_choice | multiple_choice | fill_blank | written`。主观题可包含填写文本；`multiple_choice` 默认需完全匹配全部选项才算正确。选择题为 2–6 个有序选项，键为 A–F，不能重复；不是固定四个选项。
@@ -124,17 +124,17 @@
 
 Better Auth + Passkey 自带的 `user/session/account/verification/passkey` 等认证表由**安装版本的官方 schema 生成器**产出，避免手写猜测。关闭不需要的认证方式。
 
-| 表                       | 主要列 / 约束                                                                                                                                                                                                           | 目的                           |
-| ------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------ |
-| `enrollment_invites`     | `id PK`, `token_hash UNIQUE`, `target_user_id FK`, `purpose`, `auth_epoch`, `expires_at`, `consumed_at`, `consumed_passkey_id`, `revoked_at`                                                                                | 首次注册与恢复的高熵一次性邀请 |
-| `user_access`            | `user_id PK/FK`, `status`, `auth_epoch`, `updated_at`                                                                                                                                                                  | 账户 active / recovery_pending 状态与恢复隔离 |
-| `auth_audit_events`      | `id PK`, `target_user_id`, `action`, `actor`, `created_at`, `details_json`                                                                                                                                             | 邀请、凭证变更、CLI 恢复审计；不存令牌 |
-| `practice_sessions`      | `id PK`, `user_id FK`, `filter_json`, `creation_key`, `request_hash`, `current_ordinal`, `progress_version`, `created_at`, `updated_at`, `completed_at`                                                                  | 固定题组、创建幂等与跨设备位置 |
-| `practice_session_items` | `(session_id, ordinal) PK`, `question_id`, `revision`, `UNIQUE(session_id,question_id)`                                                                                                                                 | 固定题目顺序和题目版本         |
-| `attempts`               | `id PK`, `user_id FK`, `question_id`, `revision`, `session_id`, `ordinal`, `selected_answer_json nullable`, `response_text nullable`, `state`, `result nullable`, `submitted_at`, `evaluated_at nullable`, `evaluation_version`, `idempotency_key`, `request_hash` | 每题组每题一次独立尝试 |
-| `attempt_evaluation_events` | `(attempt_id, evaluation_version) PK`, `previous_result nullable`, `new_result`, `changed_at`                                                                                                                        | 首次自评与更正自评日志         |
-| `user_question_state`    | `(user_id,question_id) PK`, `last_attempt_id`, `latest_evaluated_attempt_id`, `attempt_count`, `evaluated_count`, `correct_count`, `wrong_count`, `last_result`, `manual_review`, `starred`, `state_version`, `updated_at` | 可由尝试重建的聚合状态与独立手动标记 |
-| `user_note_state`        | `(user_id,note_id) PK`, `read_status`, `updated_at`                                                                                                                                                                     | 可选：阅读进度                 |
+| 表                          | 主要列 / 约束                                                                                                                                                                                                                                                      | 目的                                          |
+| --------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | --------------------------------------------- |
+| `enrollment_invites`        | `id PK`, `token_hash UNIQUE`, `target_user_id FK`, `purpose`, `auth_epoch`, `expires_at`, `consumed_at`, `consumed_passkey_id`, `revoked_at`                                                                                                                       | 首次注册与恢复的高熵一次性邀请                |
+| `user_access`               | `user_id PK/FK`, `status`, `auth_epoch`, `updated_at`                                                                                                                                                                                                              | 账户 active / recovery_pending 状态与恢复隔离 |
+| `auth_audit_events`         | `id PK`, `target_user_id`, `action`, `actor`, `created_at`, `details_json`                                                                                                                                                                                         | 邀请、凭证变更、CLI 恢复审计；不存令牌        |
+| `practice_sessions`         | `id PK`, `user_id FK`, `filter_json`, `creation_key`, `request_hash`, `current_ordinal`, `progress_version`, `created_at`, `updated_at`, `completed_at`                                                                                                            | 固定题组、创建幂等与跨设备位置                |
+| `practice_session_items`    | `(session_id, ordinal) PK`, `question_id`, `revision`, `UNIQUE(session_id,question_id)`                                                                                                                                                                            | 固定题目顺序和题目版本                        |
+| `attempts`                  | `id PK`, `user_id FK`, `question_id`, `revision`, `session_id`, `ordinal`, `selected_answer_json nullable`, `response_text nullable`, `state`, `result nullable`, `submitted_at`, `evaluated_at nullable`, `evaluation_version`, `idempotency_key`, `request_hash` | 每题组每题一次独立尝试                        |
+| `attempt_evaluation_events` | `(attempt_id, evaluation_version) PK`, `previous_result nullable`, `new_result`, `changed_at`                                                                                                                                                                      | 首次自评与更正自评日志                        |
+| `user_question_state`       | `(user_id,question_id) PK`, `last_attempt_id`, `latest_evaluated_attempt_id`, `attempt_count`, `evaluated_count`, `correct_count`, `wrong_count`, `last_result`, `manual_review`, `starred`, `state_version`, `updated_at`                                         | 可由尝试重建的聚合状态与独立手动标记          |
+| `user_note_state`           | `(user_id,note_id) PK`, `read_status`, `updated_at`                                                                                                                                                                                                                | 可选：阅读进度                                |
 
 尝试的 `state`：`revealed_pending_self_eval | evaluated`（客观题提交时直接 `evaluated`）。`result`：`correct | partial | incorrect | null`。不提交、不揭示不创建完成记录；用户揭示答案即创建待自评尝试。`idempotency_key` 对用户唯一，网络重试只回放同一尝试。
 
@@ -195,13 +195,13 @@ tags:
 source_kind: original
 options:
   - key: A
-    content: "0"
+    content: '0'
   - key: B
-    content: "1/2"
+    content: '1/2'
   - key: C
-    content: "1"
+    content: '1'
   - key: D
-    content: "2"
+    content: '2'
 answer: C
 ---
 
@@ -256,17 +256,17 @@ $$\iint_D(x+y)\,dx\,dy$$
 | GET    | `/api/v1/questions/:id?revision=...`                     | 指定题干/选项，不含答案；已作答回顾另走受控接口                    |
 | POST   | `/api/v1/practice-sessions`                              | 以条件创建固定、有序题组，返回 `sessionId,count`                   |
 | GET    | `/api/v1/practice-sessions/:id`                          | 本用户题组、每题进度、当前索引                                     |
-| GET    | `/api/v1/practice-sessions`                              | 本人的最近题组，支持未完成/已完成筛选与分页                       |
-| PATCH  | `/api/v1/practice-sessions/:id/progress`                 | 带 `expectedVersion` 更新当前 ordinal；冲突后重新读取             |
+| GET    | `/api/v1/practice-sessions`                              | 本人的最近题组，支持未完成/已完成筛选与分页                        |
+| PATCH  | `/api/v1/practice-sessions/:id/progress`                 | 带 `expectedVersion` 更新当前 ordinal；冲突后重新读取              |
 | GET    | `/api/v1/practice-sessions/:id/items/:ordinal`           | 题组内一题（不含未公开答案）                                       |
 | POST   | `/api/v1/attempts/submit`                                | 客观题提交 → 服务端判分 → 保存 → 返回结果+正确答案+解析            |
 | POST   | `/api/v1/attempts/reveal`                                | 主观题揭示 → 保存 `revealed_pending_self_eval` → 返回参考答案+解析 |
 | PATCH  | `/api/v1/attempts/:id/self-evaluation`                   | 本人主观题自评；只允许有效状态转移                                 |
 | GET    | `/api/v1/attempts?questionId=...`                        | 本人作答历史与已揭示解析                                           |
-| GET    | `/api/v1/attempts/:id/assets/:assetId`                    | 本人已提交/揭示版本的解析图片                                      |
-| GET    | `/api/v1/wrong-book?mode=ever\|latest\|review`           | mode 为三选一；去重错题/待复习列表                                |
+| GET    | `/api/v1/attempts/:id/assets/:assetId`                   | 本人已提交/揭示版本的解析图片                                      |
+| GET    | `/api/v1/wrong-book?mode=ever\|latest\|review`           | mode 为三选一；去重错题/待复习列表                                 |
 | PATCH  | `/api/v1/question-state/:questionId`                     | 收藏、主动标记需复习等用户状态                                     |
-| GET    | `/api/v1/statistics`                                    | 已做题数、两项明确命名的正确率、待自评/待复习题数                  |
+| GET    | `/api/v1/statistics`                                     | 已做题数、两项明确命名的正确率、待自评/待复习题数                  |
 
 认证由 `/api/auth/*` 的 Better Auth 官方 handler 管理；邀请创建/撤销通过管理员 CLI 或受保护内部命令，不需要对外公开管理员 API。若 `/api/auth/*` 也被 Worker 路由处理，注意 Workers Assets 路由配置。
 

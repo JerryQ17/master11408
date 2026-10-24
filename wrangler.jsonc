@@ -1,0 +1,28 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "master11408",
+  "main": "server/index.ts",
+  "compatibility_date": "2026-10-19",
+  "compatibility_flags": ["nodejs_compat"],
+  "assets": {
+    "binding": "ASSETS",
+    "not_found_handling": "single-page-application",
+    "run_worker_first": ["/api/*", "/_solutions/*"],
+  },
+  "observability": {
+    "enabled": true,
+  },
+  "upload_source_maps": false,
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "master11408",
+      "database_id": "8b3b5ef0-6db1-4182-8518-4c5322737e28",
+      "migrations_dir": "migrations",
+    },
+  ],
+  "vars": {
+    "AUTH_BASE_URL": "https://master11408.1397200108.workers.dev",
+    "AUTH_RP_ID": "master11408.1397200108.workers.dev",
+  },
+}
