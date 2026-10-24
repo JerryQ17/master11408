@@ -1,5 +1,7 @@
 import { randomBytes } from 'node:crypto';
 import { parseArgs } from 'node:util';
+import { sha256 } from '../server/auth/access.ts';
+import { createD1Adapter } from './d1-adapter.ts';
 
 const { positionals, values } = parseArgs({
   allowPositionals: true,
@@ -21,21 +23,9 @@ if (!['create-user', 'invite', 'recover', 'list-users'].includes(action ?? '')) 
 const isRemote = values.remote ?? false;
 const targetEnv = values.env;
 
-if (!isRemote) {
-  process.env.XDG_CONFIG_HOME ??= `${process.cwd()}/.wrangler`;
-}
-process.env.WRANGLER_LOG_PATH ??= '.wrangler/logs';
+const db = createD1Adapter({ isRemote, env: targetEnv });
 
-import { sha256 } from '../server/auth/access.ts';
-import type { Bindings } from '../server/env.ts';
-
-const { getPlatformProxy } = await import('wrangler');
-const platform = await getPlatformProxy<Bindings>({
-  remoteBindings: isRemote,
-  environment: targetEnv,
-});
 try {
-  const db = platform.env.DB;
   let userId = values.user;
   if (action === 'list-users') {
     console.log(
@@ -123,9 +113,9 @@ try {
         ),
     );
     await db.batch(operations);
-    const baseUrl =
-      platform.env.AUTH_BASE_URL ||
-      (isRemote ? 'https://11408-study.example.com' : 'http://localhost:5173');
+    const baseUrl = isRemote
+      ? 'https://master11408.1397200108.workers.dev'
+      : 'http://localhost:5173';
     const url = `${baseUrl}/enroll#token=${token}`;
     console.log(
       values.json
@@ -133,6 +123,7 @@ try {
         : `${isRemote ? '远程生产账户' : '本地账户'} ${userId}\n一次性邀请（请私下保存）：${url}`,
     );
   }
-} finally {
-  await platform.dispose();
+} catch (error) {
+  console.error('❌ 操作失败:', error);
+  process.exit(1);
 }

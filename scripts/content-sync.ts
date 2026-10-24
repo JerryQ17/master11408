@@ -1,4 +1,6 @@
 import { parseArgs } from 'node:util';
+import { validateContent } from './content-validator.ts';
+import { createD1Adapter, type D1Statement } from './d1-adapter.ts';
 
 const { values } = parseArgs({
   options: {
@@ -11,16 +13,6 @@ const { values } = parseArgs({
 const isDryRun = values['dry-run'] ?? false;
 const isRemote = values.remote ?? false;
 const targetEnv = values.env;
-
-if (!isRemote) {
-  process.env.XDG_CONFIG_HOME ??= `${process.cwd()}/.wrangler`;
-}
-process.env.WRANGLER_LOG_PATH ??= '.wrangler/logs';
-
-import { validateContent } from './content-validator.ts';
-import type { Bindings } from '../server/env.ts';
-
-const { getPlatformProxy } = await import('wrangler');
 
 console.log(
   `🚀 开始内容同步 [环境: ${isRemote ? 'remote' : 'local'}${targetEnv ? `:${targetEnv}` : ''}] ${isDryRun ? '(DRY-RUN 预览模式)' : ''}`,
@@ -35,49 +27,95 @@ if (!validation.valid) {
   process.exit(1);
 }
 
-const platform = await getPlatformProxy<Bindings>({
-  remoteBindings: isRemote,
-  environment: targetEnv,
-});
-const db = platform.env.DB;
+const db = createD1Adapter({ isRemote, env: targetEnv });
 const runId = crypto.randomUUID();
 const startedAt = Date.now();
 const lockOwner = crypto.randomUUID();
 
+interface DbTopic {
+  id: string;
+  slug: string;
+  title: string;
+  sort_order: number;
+  active: number;
+}
+
+interface DbTag {
+  id: string;
+  parent_id: string | null;
+  name: string;
+  slug: string;
+  sort_order: number;
+  exam_year: number | null;
+  active: number;
+}
+
+interface DbNote {
+  id: string;
+  content_hash: string;
+}
+
+interface DbQuestion {
+  id: string;
+  current_revision: number;
+  active: number;
+}
+
+interface DbRevision {
+  question_id: string;
+  revision: number;
+  content_hash: string;
+}
+
 try {
-  // 1. 获取锁 (租约 60 秒)
-  const lockRow = await db
-    .prepare('SELECT * FROM content_sync_lock WHERE id = ?')
-    .bind('singleton')
-    .first<{
-      owner_token: string;
-      fencing_version: number;
-      lease_expires_at: number;
-    }>();
+  // 1. 一次性获取当前数据库状态（锁、Topics、Tags、Notes、Questions、Revisions）
+  const initSql = [
+    'SELECT owner_token, fencing_version, lease_expires_at FROM content_sync_lock WHERE id = "singleton";',
+    'SELECT id, slug, title, sort_order, active FROM topics;',
+    'SELECT id, parent_id, name, slug, sort_order, exam_year, active FROM tags;',
+    'SELECT id, content_hash FROM notes;',
+    'SELECT id, current_revision, active FROM questions;',
+    'SELECT question_id, revision, content_hash FROM question_revisions;',
+  ].join('\n');
 
-  let fencingVersion = 1;
+  const initResults = await db.rawQuery(initSql);
+  const lockRow =
+    (initResults[0]?.results?.[0] as unknown as
+      | {
+          owner_token: string;
+          fencing_version: number;
+          lease_expires_at: number;
+        }
+      | undefined) ?? null;
+
   const now = Date.now();
-  if (lockRow) {
-    if (lockRow.lease_expires_at > now && !isDryRun) {
-      throw new Error(
-        `当前数据库已被其他同步任务锁定 (持有者: ${lockRow.owner_token})，请稍后再试。`,
-      );
-    }
-    fencingVersion = lockRow.fencing_version + 1;
+  if (lockRow && lockRow.lease_expires_at > now && !isDryRun) {
+    throw new Error(
+      `当前数据库已被其他同步任务锁定 (持有者: ${lockRow.owner_token})，请稍后再试。`,
+    );
   }
+  const fencingVersion = (lockRow?.fencing_version ?? 0) + 1;
 
-  if (!isDryRun) {
-    await db
-      .prepare(
-        `INSERT INTO content_sync_lock (id, owner_token, fencing_version, lease_expires_at)
-       VALUES ('singleton', ?, ?, ?)
-       ON CONFLICT(id) DO UPDATE SET owner_token=excluded.owner_token, fencing_version=excluded.fencing_version, lease_expires_at=excluded.lease_expires_at`,
-      )
-      .bind(lockOwner, fencingVersion, now + 60000)
-      .run();
-  }
+  const existingTopics = new Map<string, DbTopic>(
+    ((initResults[1]?.results ?? []) as unknown as DbTopic[]).map((r) => [r.id, r]),
+  );
+  const existingTags = new Map<string, DbTag>(
+    ((initResults[2]?.results ?? []) as unknown as DbTag[]).map((r) => [r.id, r]),
+  );
+  const existingNotes = new Map<string, DbNote>(
+    ((initResults[3]?.results ?? []) as unknown as DbNote[]).map((r) => [r.id, r]),
+  );
+  const existingQuestions = new Map<string, DbQuestion>(
+    ((initResults[4]?.results ?? []) as unknown as DbQuestion[]).map((r) => [r.id, r]),
+  );
+  const existingRevisions = new Map<string, string>(
+    ((initResults[5]?.results ?? []) as unknown as DbRevision[]).map((r) => [
+      `${r.question_id}:${r.revision}`,
+      r.content_hash,
+    ]),
+  );
 
-  // 2. 统计差异
+  // 2. 统计差异与构建更新批量 SQL
   let topicsAdded = 0;
   let topicsUpdated = 0;
   let tagsAdded = 0;
@@ -87,6 +125,22 @@ try {
   let questionsAdded = 0;
   let questionsUpdated = 0;
   let questionsUnchanged = 0;
+  let questionsArchived = 0;
+
+  const batchStmts: (D1Statement | string)[] = [];
+
+  // 锁更新
+  if (!isDryRun) {
+    batchStmts.push(
+      db
+        .prepare(
+          `INSERT INTO content_sync_lock (id, owner_token, fencing_version, lease_expires_at)
+         VALUES ('singleton', ?, ?, ?)
+         ON CONFLICT(id) DO UPDATE SET owner_token=excluded.owner_token, fencing_version=excluded.fencing_version, lease_expires_at=excluded.lease_expires_at`,
+        )
+        .bind(lockOwner, fencingVersion, now + 60000),
+    );
+  }
 
   // 同步 Topics (先父后子拓扑顺序)
   const sortedTopics = [...validation.topics.values()].sort((a, b) => {
@@ -96,29 +150,27 @@ try {
   });
 
   for (const t of sortedTopics) {
-    const existing = await db
-      .prepare('SELECT id, slug, title, sort_order, active FROM topics WHERE id = ?')
-      .bind(t.id)
-      .first();
-    if (!existing) {
+    if (!existingTopics.has(t.id)) {
       topicsAdded++;
       if (!isDryRun) {
-        await db
-          .prepare(
-            'INSERT INTO topics (id, parent_id, slug, title, sort_order, active) VALUES (?, ?, ?, ?, ?, 1)',
-          )
-          .bind(t.id, t.parentId ?? null, t.slug, t.title, t.sortOrder ?? 0)
-          .run();
+        batchStmts.push(
+          db
+            .prepare(
+              'INSERT INTO topics (id, parent_id, slug, title, sort_order, active) VALUES (?, ?, ?, ?, ?, 1)',
+            )
+            .bind(t.id, t.parentId ?? null, t.slug, t.title, t.sortOrder ?? 0),
+        );
       }
     } else {
       topicsUpdated++;
       if (!isDryRun) {
-        await db
-          .prepare(
-            'UPDATE topics SET parent_id=?, slug=?, title=?, sort_order=?, active=1 WHERE id=?',
-          )
-          .bind(t.parentId ?? null, t.slug, t.title, t.sortOrder ?? 0, t.id)
-          .run();
+        batchStmts.push(
+          db
+            .prepare(
+              'UPDATE topics SET parent_id=?, slug=?, title=?, sort_order=?, active=1 WHERE id=?',
+            )
+            .bind(t.parentId ?? null, t.slug, t.title, t.sortOrder ?? 0, t.id),
+        );
       }
     }
   }
@@ -131,75 +183,69 @@ try {
   });
 
   for (const t of sortedTags) {
-    const existing = await db.prepare('SELECT id FROM tags WHERE id = ?').bind(t.id).first();
-    if (!existing) {
+    if (!existingTags.has(t.id)) {
       tagsAdded++;
       if (!isDryRun) {
-        await db
-          .prepare(
-            'INSERT INTO tags (id, parent_id, name, slug, sort_order, exam_year, active) VALUES (?, ?, ?, ?, ?, ?, 1)',
-          )
-          .bind(t.id, t.parentId ?? null, t.name, t.slug, t.sortOrder ?? 0, t.examYear ?? null)
-          .run();
+        batchStmts.push(
+          db
+            .prepare(
+              'INSERT INTO tags (id, parent_id, name, slug, sort_order, exam_year, active) VALUES (?, ?, ?, ?, ?, ?, 1)',
+            )
+            .bind(t.id, t.parentId ?? null, t.name, t.slug, t.sortOrder ?? 0, t.examYear ?? null),
+        );
       }
     } else {
       tagsUpdated++;
       if (!isDryRun) {
-        await db
-          .prepare(
-            'UPDATE tags SET parent_id=?, name=?, slug=?, sort_order=?, exam_year=?, active=1 WHERE id=?',
-          )
-          .bind(t.parentId ?? null, t.name, t.slug, t.sortOrder ?? 0, t.examYear ?? null, t.id)
-          .run();
+        batchStmts.push(
+          db
+            .prepare(
+              'UPDATE tags SET parent_id=?, name=?, slug=?, sort_order=?, exam_year=?, active=1 WHERE id=?',
+            )
+            .bind(t.parentId ?? null, t.name, t.slug, t.sortOrder ?? 0, t.examYear ?? null, t.id),
+        );
       }
     }
   }
 
   // 同步 Notes
   for (const n of validation.notes) {
-    const existing = await db
-      .prepare('SELECT id, content_hash FROM notes WHERE id = ?')
-      .bind(n.id)
-      .first<{ content_hash: string }>();
+    const existing = existingNotes.get(n.id);
     if (!existing) {
       notesAdded++;
       if (!isDryRun) {
-        await db
-          .prepare(
-            'INSERT INTO notes (id, topic_id, title, body_md, sort_order, content_hash, active) VALUES (?, ?, ?, ?, ?, ?, 1)',
-          )
-          .bind(n.id, n.topicId, n.title, n.bodyMd, n.sortOrder ?? 0, n.contentHash)
-          .run();
+        batchStmts.push(
+          db
+            .prepare(
+              'INSERT INTO notes (id, topic_id, title, body_md, sort_order, content_hash, active) VALUES (?, ?, ?, ?, ?, ?, 1)',
+            )
+            .bind(n.id, n.topicId, n.title, n.bodyMd, n.sortOrder ?? 0, n.contentHash),
+        );
       }
     } else if (existing.content_hash !== n.contentHash) {
       notesUpdated++;
       if (!isDryRun) {
-        await db
-          .prepare(
-            'UPDATE notes SET topic_id=?, title=?, body_md=?, sort_order=?, content_hash=?, active=1 WHERE id=?',
-          )
-          .bind(n.topicId, n.title, n.bodyMd, n.sortOrder ?? 0, n.contentHash, n.id)
-          .run();
+        batchStmts.push(
+          db
+            .prepare(
+              'UPDATE notes SET topic_id=?, title=?, body_md=?, sort_order=?, content_hash=?, active=1 WHERE id=?',
+            )
+            .bind(n.topicId, n.title, n.bodyMd, n.sortOrder ?? 0, n.contentHash, n.id),
+        );
       }
     }
   }
 
-  // 同步 Questions (含 revision 增量与原子批次)
+  // 同步 Questions
   for (const q of validation.questions) {
-    const existingQ = await db
-      .prepare('SELECT id, current_revision FROM questions WHERE id = ?')
-      .bind(q.id)
-      .first<{
-        current_revision: number;
-      }>();
-
+    const existingQ = existingQuestions.get(q.id);
     const optionsJson = q.options ? JSON.stringify(q.options) : null;
     const answerJson = JSON.stringify(q.answer);
 
     if (!existingQ) {
       questionsAdded++;
       if (!isDryRun) {
-        const batch = [
+        batchStmts.push(
           db
             .prepare(
               'INSERT INTO questions (id, type, difficulty, current_revision, source_kind, exam_year, active) VALUES (?, ?, ?, 1, ?, ?, 1)',
@@ -220,37 +266,29 @@ try {
               q.contentHash,
               now,
             ),
-        ];
+        );
         for (const topicId of q.topics) {
-          batch.push(
+          batchStmts.push(
             db
               .prepare('INSERT INTO question_topics (question_id, topic_id) VALUES (?, ?)')
               .bind(q.id, topicId),
           );
         }
         for (const tagId of q.tags) {
-          batch.push(
+          batchStmts.push(
             db
               .prepare('INSERT INTO question_tags (question_id, tag_id) VALUES (?, ?)')
               .bind(q.id, tagId),
           );
         }
-        await db.batch(batch);
       }
     } else {
-      const latestRev = await db
-        .prepare(
-          'SELECT content_hash FROM question_revisions WHERE question_id = ? AND revision = ?',
-        )
-        .bind(q.id, existingQ.current_revision)
-        .first<{ content_hash: string }>();
-
-      if (!latestRev || latestRev.content_hash !== q.contentHash) {
-        // 创建新 revision
+      const latestHash = existingRevisions.get(`${q.id}:${existingQ.current_revision}`);
+      if (!latestHash || latestHash !== q.contentHash) {
         questionsUpdated++;
         const nextRev = existingQ.current_revision + 1;
         if (!isDryRun) {
-          const batch = [
+          batchStmts.push(
             db
               .prepare(
                 'UPDATE questions SET type=?, difficulty=?, current_revision=?, source_kind=?, exam_year=?, active=1 WHERE id=?',
@@ -274,67 +312,43 @@ try {
               ),
             db.prepare('DELETE FROM question_topics WHERE question_id=?').bind(q.id),
             db.prepare('DELETE FROM question_tags WHERE question_id=?').bind(q.id),
-          ];
+          );
           for (const topicId of q.topics) {
-            batch.push(
+            batchStmts.push(
               db
                 .prepare('INSERT INTO question_topics (question_id, topic_id) VALUES (?, ?)')
                 .bind(q.id, topicId),
             );
           }
           for (const tagId of q.tags) {
-            batch.push(
+            batchStmts.push(
               db
                 .prepare('INSERT INTO question_tags (question_id, tag_id) VALUES (?, ?)')
                 .bind(q.id, tagId),
             );
           }
-          await db.batch(batch);
         }
       } else {
         questionsUnchanged++;
-        // 确保关联同步
-        if (!isDryRun) {
-          const batch = [
-            db.prepare('DELETE FROM question_topics WHERE question_id=?').bind(q.id),
-            db.prepare('DELETE FROM question_tags WHERE question_id=?').bind(q.id),
-          ];
-          for (const topicId of q.topics) {
-            batch.push(
-              db
-                .prepare('INSERT INTO question_topics (question_id, topic_id) VALUES (?, ?)')
-                .bind(q.id, topicId),
-            );
-          }
-          for (const tagId of q.tags) {
-            batch.push(
-              db
-                .prepare('INSERT INTO question_tags (question_id, tag_id) VALUES (?, ?)')
-                .bind(q.id, tagId),
-            );
-          }
-          await db.batch(batch);
+        if (!isDryRun && existingQ.active === 0) {
+          batchStmts.push(db.prepare('UPDATE questions SET active=1 WHERE id=?').bind(q.id));
         }
       }
     }
   }
 
-  // 3. 归档处理 (只有全部更新成功后，标记缺失的旧题目、笔记、分类为 active = 0)
-  let questionsArchived = 0;
+  // 归档处理
   if (!isDryRun) {
-    const allDbQuestions = (
-      await db.prepare('SELECT id FROM questions WHERE active = 1').all<{ id: string }>()
-    ).results;
     const currentQuestionIds = new Set(validation.questions.map((q) => q.id));
-    for (const row of allDbQuestions) {
-      if (!currentQuestionIds.has(row.id)) {
-        await db.prepare('UPDATE questions SET active = 0 WHERE id = ?').bind(row.id).run();
+    for (const [id, q] of existingQuestions.entries()) {
+      if (q.active === 1 && !currentQuestionIds.has(id)) {
+        batchStmts.push(db.prepare('UPDATE questions SET active = 0 WHERE id = ?').bind(id));
         questionsArchived++;
       }
     }
   }
 
-  // 记录同步审计
+  // 记录同步审计与释放锁
   const summary = {
     topics: { added: topicsAdded, updated: topicsUpdated },
     tags: { added: tagsAdded, updated: tagsUpdated },
@@ -348,25 +362,26 @@ try {
   };
 
   if (!isDryRun) {
-    await db
-      .prepare(
-        `INSERT INTO content_sync_runs (id, git_sha, source_hash, target_env, started_at, finished_at, status, summary_json)
-       VALUES (?, 'local-workspace', 'source-hash', ?, ?, ?, 'success', ?)`,
-      )
-      .bind(
-        runId,
-        targetEnv ?? (isRemote ? 'remote' : 'local'),
-        startedAt,
-        Date.now(),
-        JSON.stringify(summary),
-      )
-      .run();
+    batchStmts.push(
+      db
+        .prepare(
+          `INSERT INTO content_sync_runs (id, git_sha, source_hash, target_env, started_at, finished_at, status, summary_json)
+         VALUES (?, 'local-workspace', 'source-hash', ?, ?, ?, 'success', ?)`,
+        )
+        .bind(
+          runId,
+          targetEnv ?? (isRemote ? 'remote' : 'local'),
+          startedAt,
+          Date.now(),
+          JSON.stringify(summary),
+        ),
+      db
+        .prepare('UPDATE content_sync_lock SET lease_expires_at = 0 WHERE id = ?')
+        .bind('singleton'),
+    );
 
-    // 释放锁
-    await db
-      .prepare('UPDATE content_sync_lock SET lease_expires_at = 0 WHERE id = ?')
-      .bind('singleton')
-      .run();
+    // 一次性批量执行所有更新操作
+    await db.batch(batchStmts);
   }
 
   console.log(`✅ 同步完成！耗时: ${Date.now() - startedAt}ms`);
@@ -376,6 +391,7 @@ try {
   console.log(
     `  - 题目: 新增 ${questionsAdded}, 新版本 ${questionsUpdated}, 无变更 ${questionsUnchanged}, 归档 ${questionsArchived}`,
   );
-} finally {
-  await platform.dispose();
+} catch (error) {
+  console.error('❌ 同步失败:', error);
+  process.exit(1);
 }
